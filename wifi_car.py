@@ -56,6 +56,25 @@ def trigger_brake_light(duration_ms=1000):
     apply_lights()
 
 
+def flash_startup_lights(duration_ms=1000, step_ms=200):
+    try:
+        previous_headlight = STATE["headlight_enabled"]
+        elapsed = 0
+        light_on = True
+
+        while elapsed < duration_ms:
+            RED_LIGHT.value(1 if light_on else 0)
+            WHITE_LIGHT.value(1 if light_on else 0)
+            time.sleep_ms(step_ms)
+            elapsed += step_ms
+            light_on = not light_on
+
+        STATE["headlight_enabled"] = previous_headlight
+        apply_lights()
+    except Exception as err:
+        log_error("flash_startup_lights", err)
+
+
 def set_motion(motion):
     STATE["current_motion"] = motion
     try:
@@ -174,93 +193,105 @@ def build_page(distance):
     <title>Pico Smart Car</title>
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <style>
-        body { font-family: Arial; text-align: center; }
-        button { font-size: 22px; padding: 14px; margin: 6px; min-width: 140px; }
-        .brand-h1 { margin: 10px 0 2px 0; }
-        .brand-h2 { margin: 0 0 10px 0; font-weight: 600; color: #333; }
-        .distance { font-size: 40px; font-weight: bold; color: blue; }
-        .status { font-size: 22px; margin: 8px 0; }
-        .small { font-size: 18px; }
-        .banner { font-size: 28px; font-weight: bold; margin: 12px auto; padding: 10px; width: 340px; border-radius: 8px; }
+        * { box-sizing: border-box; }
+        body { font-family: Arial; margin: 0; padding: 0; }
+        .page-header { text-align: center; padding: 8px 0 4px 0; border-bottom: 1px solid #ddd; }
+        .brand-h1 { margin: 6px 0 2px 0; font-size: 22px; }
+        .brand-h2 { margin: 0 0 4px 0; font-weight: 600; color: #333; font-size: 16px; }
+        .page-body { display: flex; height: calc(100vh - 100px); }
+        .left-panel { width: 85%; padding: 10px 12px; overflow-y: auto; text-align: center; }
+        .right-panel { width: 15%; min-width: 80px; display: flex; flex-direction: column; align-items: center; justify-content: flex-start; padding-top: 14px; background: transparent; }
+        button { font-size: 20px; padding: 12px 10px; margin: 5px; width: 90%; max-width: 340px; }
+        .distance { font-size: 36px; font-weight: bold; color: blue; }
+        .status { font-size: 20px; margin: 6px 0; }
+        .small { font-size: 15px; }
+        .banner { font-size: 22px; font-weight: bold; margin: 8px auto; padding: 8px; max-width: 340px; border-radius: 8px; }
         .on { background: #d8ffd8; color: #0a6f0a; border: 2px solid #0a6f0a; }
         .off { background: #ffe5e5; color: #8a1010; border: 2px solid #8a1010; }
         .toggle-on { background: #d8ffd8; border: 2px solid #0a6f0a; color: #0a6f0a; }
         .toggle-off { background: #ffe5e5; border: 2px solid #8a1010; color: #8a1010; }
         .toggle-neutral { background: #fff6d8; border: 2px solid #8a6f10; color: #6a5208; }
-        .row { margin: 8px 0; }
-        .slider-wrap { width: 92%; max-width: 460px; margin: 10px auto; }
-        .slider-readout { font-size: 18px; margin: 8px 0 14px 0; font-weight: bold; }
-        .throttle-vertical-layout { display: flex; justify-content: center; align-items: center; gap: 16px; }
-        .throttle-ruler { height: 320px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; font-size: 13px; color: #222; }
-        .throttle-ruler span { display: block; min-width: 44px; text-align: right; }
+        .row { margin: 6px 0; }
+        .slider-readout { font-size: 12px; font-weight: bold; text-align: center; margin: 6px 0; word-break: break-word; }
         .throttle-control-stack { display: flex; flex-direction: column; align-items: center; }
+        .throttle-axis-stack { display: flex; flex-direction: column; align-items: center; }
+        .arrow-btn { background: transparent; border: none; padding: 0; margin: 0; width: 0; height: 0; cursor: pointer; }
         .arrow-tip-up,
-        .arrow-tip-down { width: 0; height: 0; border-left: 18px solid transparent; border-right: 18px solid transparent; }
-        .arrow-tip-up { border-bottom: 22px solid #1f2937; margin-bottom: 4px; }
-        .arrow-tip-down { border-top: 22px solid #1f2937; margin-top: 4px; }
-        .slider-axis { position: relative; width: 68px; height: 320px; display: flex; align-items: center; justify-content: center; }
-        .slider-axis::before { content: ""; position: absolute; height: 286px; width: 16px; border: 3px solid #1f2937; border-radius: 10px; background: repeating-linear-gradient(to bottom, #f8fafc 0, #f8fafc 8px, #dbe4ef 8px, #dbe4ef 16px); }
-        .center-stop-square { position: absolute; width: 26px; height: 26px; border: 2px solid #7a0014; background: #d90429; border-radius: 4px; z-index: 3; }
-        #throttle-slider { width: 286px; transform: rotate(-90deg); z-index: 4; background: transparent; -webkit-appearance: none; appearance: none; }
+        .arrow-tip-down { border-left: 12px solid transparent; border-right: 12px solid transparent; }
+        .arrow-tip-up { border-bottom: 16px solid #1f2937; margin-bottom: 3px; }
+        .arrow-tip-down { border-top: 16px solid #1f2937; margin-top: 3px; }
+        .arrow-btn:active { filter: brightness(1.15); }
+        .throttle-ruler-wrap { display: flex; align-items: center; gap: 4px; }
+        .throttle-ruler { height: 260px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; font-size: 10px; color: #444; }
+        .throttle-ruler span { display: block; text-align: right; }
+        .slider-axis { position: relative; width: 56px; height: 260px; display: flex; align-items: center; justify-content: center; overflow: visible; }
+        .slider-axis::before { content: ""; position: absolute; height: 260px; width: 22px; border: 2px solid #1f2937; border-radius: 8px; background: repeating-linear-gradient(to bottom, #f8fafc 0, #f8fafc 6px, #dbe4ef 6px, #dbe4ef 12px); }
+        .center-stop-square { position: absolute; width: 28px; height: 28px; border: 2px solid #7a0014; background: #d90429; border-radius: 3px; z-index: 3; }
+        #throttle-slider { width: 300px; transform: rotate(-90deg) translateX(0); transform-origin: center center; z-index: 4; background: transparent; -webkit-appearance: none; appearance: none; margin: 0; padding: 0; }
         #throttle-slider:focus { outline: none; }
-        #throttle-slider::-webkit-slider-runnable-track { height: 14px; background: transparent; }
-        #throttle-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; border-radius: 4px; background: #d90429; border: 2px solid #7a0014; margin-top: -5px; }
-        #throttle-slider::-moz-range-track { height: 14px; background: transparent; }
-        #throttle-slider::-moz-range-thumb { width: 24px; height: 24px; border-radius: 4px; background: #d90429; border: 2px solid #7a0014; }
+        #throttle-slider::-webkit-slider-runnable-track { height: 22px; background: transparent; }
+        #throttle-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 28px; height: 28px; border-radius: 3px; background: var(--thumb-color, #d90429); border: 2px solid #333; margin-top: -3px; }
+        #throttle-slider::-moz-range-track { height: 22px; background: transparent; }
+        #throttle-slider::-moz-range-thumb { width: 28px; height: 28px; border-radius: 3px; background: var(--thumb-color, #d90429); border: 2px solid #333; }
+        .slider-axis.fwd::before { background: repeating-linear-gradient(to bottom, #bbf7d0 0, #bbf7d0 6px, #86efac 6px, #86efac 12px); border-color: #16a34a; }
+        .slider-axis.rev::before { background: repeating-linear-gradient(to bottom, #fef9c3 0, #fef9c3 6px, #fde68a 6px, #fde68a 12px); border-color: #ca8a04; }
     </style>
 </head>
 <body>
-    <h1 class="brand-h1">""" + BRAND_H1 + """</h1>
-    <h2 class="brand-h2">""" + BRAND_H2 + """</h2>
-
-    <div class="banner """ + ("on" if self_drive_text == "ON" else "off") + """>SELF DRIVING: """ + self_drive_text + """</div>
-
-    <div id="status-line" class="status"><b>Status:</b> """ + status_text + """</div>
-
-    <h2>Ultrasonic Distance</h2>
-    <div class="distance">""" + str(distance) + """ cm</div>
-    <div class="small">Auto reverse threshold: """ + str(TOO_CLOSE_CM) + """ cm</div>
-
-    <div class="row">
-        <button id="btn-power" onclick="togglePower()">Start Car</button>
-    </div>
-    <div class="row">
-        <button id="btn-mode" onclick="toggleMode()">Switch To Auto</button>
-    </div>
-    <div class="row">
-        <button id="btn-headlight" onclick="toggleHeadlight()">Headlight: OFF</button>
-    </div>
-    <div class="row">
-        <button id="btn-brake" onclick="brakeNow()">Brake</button>
+    <div class="page-header">
+        <h1 class="brand-h1">""" + BRAND_H1 + """</h1>
+        <h2 class="brand-h2">""" + BRAND_H2 + """</h2>
     </div>
 
-    <h2>Manual Drive Throttle</h2>
-    <div class="slider-wrap">
-        <div id="throttle-readout" class="slider-readout">Stop (0%)</div>
-        <div class="throttle-vertical-layout">
-            <div class="throttle-ruler">
-                <span>+100%</span>
-                <span>+80%</span>
-                <span>+60%</span>
-                <span>+40%</span>
-                <span>+20%</span>
-                <span>0%</span>
-                <span>-20%</span>
-                <span>-40%</span>
-                <span>-60%</span>
-                <span>-80%</span>
-                <span>-100%</span>
+    <div class="page-body">
+        <div class="left-panel">
+            <div class="banner """ + ("on" if self_drive_text == "ON" else "off") + """>SELF DRIVING: """ + self_drive_text + """</div>
+            <div id="status-line" class="status"><b>Status:</b> """ + status_text + """</div>
+            <div class="distance">""" + str(distance) + """ cm</div>
+            <div class="small">Obstacle threshold: """ + str(TOO_CLOSE_CM) + """ cm</div>
+            <div class="row">
+                <button id="btn-power" onclick="togglePower()">Turn ON Car</button>
             </div>
-            <div class="throttle-control-stack">
-                <div class="arrow-tip-up"></div>
-                <div class="slider-axis">
-                    <div class="center-stop-square"></div>
-                    <input id="throttle-slider" type="range" min="-100" max="100" step="10" value="0" oninput="handleThrottleInput(this.value)">
-                </div>
-                <div class="arrow-tip-down"></div>
+            <div class="row">
+                <button id="btn-mode" onclick="toggleMode()">Switch To Auto</button>
+            </div>
+            <div class="row">
+                <button id="btn-headlight" onclick="toggleHeadlight()">Headlight: OFF</button>
+            </div>
+            <div class="row">
+                <button id="btn-brake" onclick="brakeNow()">Brake</button>
             </div>
         </div>
-        <div class="small">Move up for forward, down for reverse, center red square for stop</div>
+
+        <div class="right-panel">
+            <div id="throttle-readout" class="slider-readout">Stop<br>0%</div>
+            <div class="throttle-control-stack">
+                <div class="throttle-ruler-wrap">
+                    <div class="throttle-ruler">
+                        <span>+100</span>
+                        <span>+80</span>
+                        <span>+60</span>
+                        <span>+40</span>
+                        <span>+20</span>
+                        <span>0</span>
+                        <span>-20</span>
+                        <span>-40</span>
+                        <span>-60</span>
+                        <span>-80</span>
+                        <span>-100</span>
+                    </div>
+                    <div class="throttle-axis-stack">
+                        <button id="btn-throttle-up" class="arrow-btn arrow-tip-up" aria-label="Increase speed" onclick="bumpThrottle(10)"></button>
+                        <div class="slider-axis">
+                            <div class="center-stop-square"></div>
+                            <input id="throttle-slider" type="range" min="-100" max="100" step="10" value="0" oninput="handleThrottleInput(this.value)">
+                        </div>
+                        <button id="btn-throttle-down" class="arrow-btn arrow-tip-down" aria-label="Decrease speed" onclick="bumpThrottle(-10)"></button>
+                    </div>
+                </div>
+            </div>
+            <div class="small" style="font-size:10px;margin-top:6px;">&#9650; Fwd / Rev &#9660;</div>
+        </div>
     </div>
 
     <script>
@@ -269,14 +300,27 @@ def build_page(distance):
 
         function throttleLabel(value) {
             var v = parseInt(value || 0, 10);
-            if (v > 0) return 'Forward ' + v + '%';
-            if (v < 0) return 'Reverse ' + Math.abs(v) + '%';
-            return 'Stop (0%)';
+            if (v > 0) return 'Fwd<br>' + v + '%';
+            if (v < 0) return 'Rev<br>' + Math.abs(v) + '%';
+            return 'Stop<br>0%';
         }
 
         function updateThrottleReadout(value) {
+            var v = parseInt(value || 0, 10);
             var readout = document.getElementById('throttle-readout');
-            if (readout) readout.textContent = throttleLabel(value);
+            if (readout) readout.innerHTML = throttleLabel(v);
+            var axis = document.querySelector('.slider-axis');
+            var thumb = document.getElementById('throttle-slider');
+            if (v > 0) {
+                if (axis) { axis.classList.remove('rev'); axis.classList.add('fwd'); }
+                if (thumb) thumb.style.setProperty('--thumb-color', '#16a34a');
+            } else if (v < 0) {
+                if (axis) { axis.classList.remove('fwd'); axis.classList.add('rev'); }
+                if (thumb) thumb.style.setProperty('--thumb-color', '#ca8a04');
+            } else {
+                if (axis) { axis.classList.remove('fwd', 'rev'); }
+                if (thumb) thumb.style.setProperty('--thumb-color', '#d90429');
+            }
         }
 
         function applyStatus(s) {
@@ -291,11 +335,20 @@ def build_page(distance):
             var d = document.querySelector('.distance');
             if (d) d.textContent = s.distance + ' cm';
 
-            var slider = document.getElementById('throttle-slider');
-            if (slider && String(slider.value) !== String(s.manual_throttle)) {
-                slider.value = s.manual_throttle;
+            var displayThrottle = s.manual_throttle;
+            if (s.status !== 'RUNNING') {
+                displayThrottle = 0;
             }
-            updateThrottleReadout(s.manual_throttle);
+            if (s.mode === 'AUTO') {
+                if (s.motion === 'forward') { displayThrottle = 100; }
+                else if (s.motion === 'backward') { displayThrottle = -100; }
+                else { displayThrottle = 0; }
+            }
+            var slider = document.getElementById('throttle-slider');
+            if (slider && String(slider.value) !== String(displayThrottle)) {
+                slider.value = displayThrottle;
+            }
+            updateThrottleReadout(displayThrottle);
 
             var power = document.getElementById('btn-power');
             if (power) {
@@ -394,6 +447,17 @@ def build_page(distance):
             }, 120);
         }
 
+        function bumpThrottle(delta) {
+            var slider = document.getElementById('throttle-slider');
+            if (!slider) return;
+            var current = parseInt(slider.value || 0, 10);
+            var next = current + delta;
+            if (next > 100) next = 100;
+            if (next < -100) next = -100;
+            slider.value = next;
+            handleThrottleInput(next);
+        }
+
         function updateStatus() {
             return fetch('/api/status', { cache: 'no-store' })
                 .then(function(r){ return r.json(); })
@@ -459,7 +523,7 @@ def build_status_json():
     last_action_text = STATE["last_action"].replace('"', "'")
     return (
         '{{"status":"{}","mode":"{}","self_drive":"{}","headlight":"{}",'
-        '"last_action":"{}","distance":{},"manual_throttle":{}}}'
+        '"last_action":"{}","distance":{},"manual_throttle":{},"motion":"{}"}}'
     ).format(
         status_text,
         mode_text,
@@ -468,6 +532,7 @@ def build_status_json():
         last_action_text,
         STATE["last_distance"],
         STATE["manual_throttle_pct"],
+        STATE["current_motion"],
     )
 
 
@@ -522,6 +587,7 @@ def apply_command(command_name):
     if command_name == "start":
         if should_process_action("start"):
             STATE["car_started"] = True
+            flash_startup_lights(1000)
             STATE["last_action"] = "start"
             return True
         return False
@@ -530,6 +596,7 @@ def apply_command(command_name):
         if should_process_action("stopcar"):
             STATE["car_started"] = False
             STATE["manual_throttle_pct"] = 0
+            STATE["headlight_enabled"] = False
             set_motion("stopped")
             trigger_brake_light()
             STATE["last_action"] = "stop"
