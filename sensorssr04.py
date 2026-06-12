@@ -1,8 +1,9 @@
 from machine import Pin
 import time
+import config
 
-echo = Pin(14, Pin.IN)
-trig = Pin(15, Pin.OUT)
+echo = Pin(config.SR04_ECHO_PIN, Pin.IN)
+trig = Pin(config.SR04_TRIG_PIN, Pin.OUT)
 
 _last_good_distance = None
 

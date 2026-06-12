@@ -12,6 +12,7 @@ BRAND_H1 = "Turtleback Robotics Academy"
 BRAND_H2 = "Summer Camp 2026"
 TOO_CLOSE_CM = 15
 AUTO_DECISION_INTERVAL_MS = 250
+MANUAL_PWM_WINDOW_MS = 200
 SERVER_TIMEOUT_SEC = 0.2
 ACTION_DEBOUNCE_MS = 250
 REQUEST_LOG_ENABLED = False
@@ -24,6 +25,8 @@ STATE = {
     "headlight_enabled": False,
     "current_motion": "stopped",
     "brake_until_ms": 0,
+    "manual_throttle_pct": 0,
+    "manual_pwm_window_start_ms": 0,
 }
 
 LAST_ACTION_TS = {}
@@ -73,6 +76,45 @@ def set_motion(motion):
         except Exception as stop_err:
             log_error("set_motion_stop_fallback", stop_err)
     apply_lights()
+
+
+def normalize_throttle_pct(raw_value):
+    try:
+        value = int(raw_value)
+    except Exception:
+        value = 0
+
+    if value > 100:
+        value = 100
+    if value < -100:
+        value = -100
+
+    if value >= 0:
+        value = ((value + 5) // 10) * 10
+    else:
+        value = -(((-value + 5) // 10) * 10)
+
+    if value > 100:
+        value = 100
+    if value < -100:
+        value = -100
+    return value
+
+
+def set_manual_throttle(raw_value):
+    throttle = normalize_throttle_pct(raw_value)
+    if not STATE["car_started"]:
+        STATE["manual_throttle_pct"] = 0
+        STATE["last_action"] = "turn on required"
+        return False
+    STATE["manual_throttle_pct"] = throttle
+    STATE["manual_pwm_window_start_ms"] = time.ticks_ms()
+    STATE["drive_mode"] = "manual"
+    STATE["last_action"] = "manual throttle {}%".format(throttle)
+    if throttle == 0:
+        set_motion("stopped")
+        trigger_brake_light(300)
+    return True
 
 
 def should_process_action(action_key):
@@ -125,9 +167,7 @@ def parse_route_and_params(path):
 
 def build_page(distance):
     status_text = "RUNNING" if STATE["car_started"] else "STOPPED"
-    mode_text = "AUTO" if STATE["drive_mode"] == "auto" else "MANUAL"
     self_drive_text = "ON" if (STATE["car_started"] and STATE["drive_mode"] == "auto") else "OFF"
-    headlight_text = "ON" if STATE["headlight_enabled"] else "OFF"
     return """<!DOCTYPE html>
 <html>
 <head>
@@ -148,9 +188,9 @@ def build_page(distance):
         .toggle-off { background: #ffe5e5; border: 2px solid #8a1010; color: #8a1010; }
         .toggle-neutral { background: #fff6d8; border: 2px solid #8a6f10; color: #6a5208; }
         .row { margin: 8px 0; }
-        .pad { width: 260px; margin: 10px auto; display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 8px; }
-        .pad button { min-width: 0; width: 100%; height: 72px; border-radius: 16px; font-size: 26px; }
-        .ghost { visibility: hidden; }
+        .slider-wrap { width: 92%; max-width: 420px; margin: 10px auto; }
+        .slider-readout { font-size: 18px; margin: 8px 0; font-weight: bold; }
+        #throttle-slider { width: 100%; }
     </style>
 </head>
 <body>
@@ -174,22 +214,32 @@ def build_page(distance):
     <div class="row">
         <button id="btn-headlight" onclick="toggleHeadlight()">Headlight: OFF</button>
     </div>
+    <div class="row">
+        <button id="btn-brake" onclick="brakeNow()">Brake</button>
+    </div>
 
-    <h2>Drive Pad (Hold)</h2>
-    <div class="pad">
-        <button class="ghost"></button>
-        <button id="btn-up">▲</button>
-        <button class="ghost"></button>
-        <button id="btn-left">◀</button>
-        <button id="btn-stop">■</button>
-        <button id="btn-right">▶</button>
-        <button class="ghost"></button>
-        <button id="btn-down">▼</button>
-        <button class="ghost"></button>
+    <h2>Manual Drive Throttle</h2>
+    <div class="slider-wrap">
+        <div id="throttle-readout" class="slider-readout">Stop (0%)</div>
+        <input id="throttle-slider" type="range" min="-100" max="100" step="10" value="0" oninput="handleThrottleInput(this.value)">
+        <div class="small">Reverse -100% | 0% Stop | +100% Forward</div>
     </div>
 
     <script>
         var LAST_STATUS = null;
+        var THROTTLE_SEND_TIMER = null;
+
+        function throttleLabel(value) {
+            var v = parseInt(value || 0, 10);
+            if (v > 0) return 'Forward ' + v + '%';
+            if (v < 0) return 'Reverse ' + Math.abs(v) + '%';
+            return 'Stop (0%)';
+        }
+
+        function updateThrottleReadout(value) {
+            var readout = document.getElementById('throttle-readout');
+            if (readout) readout.textContent = throttleLabel(value);
+        }
 
         function applyStatus(s) {
             LAST_STATUS = s;
@@ -203,13 +253,19 @@ def build_page(distance):
             var d = document.querySelector('.distance');
             if (d) d.textContent = s.distance + ' cm';
 
+            var slider = document.getElementById('throttle-slider');
+            if (slider && String(slider.value) !== String(s.manual_throttle)) {
+                slider.value = s.manual_throttle;
+            }
+            updateThrottleReadout(s.manual_throttle);
+
             var power = document.getElementById('btn-power');
             if (power) {
                 if (s.status === 'RUNNING') {
-                    power.textContent = 'Stop Car';
+                    power.textContent = 'Turn OFF Car';
                     power.className = 'toggle-off';
                 } else {
-                    power.textContent = 'Start Car';
+                    power.textContent = 'Turn ON Car';
                     power.className = 'toggle-on';
                 }
             }
@@ -258,6 +314,10 @@ def build_page(distance):
             return cmd('start');
         }
 
+        function brakeNow() {
+            return cmd('brake');
+        }
+
         function toggleMode() {
             if (LAST_STATUS && LAST_STATUS.mode === 'AUTO') {
                 return cmd('manual');
@@ -272,34 +332,28 @@ def build_page(distance):
             return cmd('headlight_on');
         }
 
-        function bindHold(buttonId, moveName) {
-            var el = document.getElementById(buttonId);
-            if (!el) return;
-
-            function down(ev) {
-                ev.preventDefault();
-                cmd('manual').then(function(){ cmd(moveName); });
-            }
-
-            function up(ev) {
-                ev.preventDefault();
-                cmd('stop');
-            }
-
-            el.addEventListener('pointerdown', down);
-            el.addEventListener('pointerup', up);
-            el.addEventListener('pointercancel', up);
-            el.addEventListener('pointerleave', up);
+        function sendThrottle(value) {
+            return fetch('/api/throttle?value=' + value, { cache: 'no-store' })
+                .then(function(r){ return r.json(); })
+                .then(function(res){
+                    if (res && res.status) {
+                        applyStatus(res);
+                    }
+                    return res;
+                })
+                .catch(function(){
+                    return updateStatus();
+                });
         }
 
-        bindHold('btn-up', 'forward');
-        bindHold('btn-down', 'backward');
-        bindHold('btn-left', 'left');
-        bindHold('btn-right', 'right');
-
-        var stopBtn = document.getElementById('btn-stop');
-        if (stopBtn) {
-            stopBtn.addEventListener('pointerdown', function(ev){ ev.preventDefault(); cmd('stop'); });
+        function handleThrottleInput(value) {
+            updateThrottleReadout(value);
+            if (THROTTLE_SEND_TIMER) {
+                clearTimeout(THROTTLE_SEND_TIMER);
+            }
+            THROTTLE_SEND_TIMER = setTimeout(function(){
+                sendThrottle(value);
+            }, 120);
         }
 
         function updateStatus() {
@@ -367,7 +421,7 @@ def build_status_json():
     last_action_text = STATE["last_action"].replace('"', "'")
     return (
         '{{"status":"{}","mode":"{}","self_drive":"{}","headlight":"{}",'
-        '"last_action":"{}","distance":{}}}'
+        '"last_action":"{}","distance":{},"manual_throttle":{}}}'
     ).format(
         status_text,
         mode_text,
@@ -375,6 +429,7 @@ def build_status_json():
         headlight_text,
         last_action_text,
         STATE["last_distance"],
+        STATE["manual_throttle_pct"],
     )
 
 
@@ -436,6 +491,7 @@ def apply_command(command_name):
     if command_name == "stopcar":
         if should_process_action("stopcar"):
             STATE["car_started"] = False
+            STATE["manual_throttle_pct"] = 0
             set_motion("stopped")
             trigger_brake_light()
             STATE["last_action"] = "stop"
@@ -452,6 +508,7 @@ def apply_command(command_name):
     if command_name == "auto":
         if should_process_action("auto"):
             STATE["drive_mode"] = "auto"
+            STATE["manual_throttle_pct"] = 0
             STATE["last_action"] = "auto mode"
             return True
         return False
@@ -472,15 +529,18 @@ def apply_command(command_name):
             return True
         return False
 
+    if command_name == "brake":
+        STATE["manual_throttle_pct"] = 0
+        set_motion("stopped")
+        trigger_brake_light()
+        STATE["last_action"] = "manual brake"
+        return True
+
     if STATE["drive_mode"] == "manual":
         if command_name == "forward":
-            set_motion("forward")
-            STATE["last_action"] = "manual forward"
-            return True
+            return set_manual_throttle(100)
         if command_name == "backward":
-            set_motion("backward")
-            STATE["last_action"] = "manual backward"
-            return True
+            return set_manual_throttle(-100)
         if command_name == "left":
             set_motion("left")
             STATE["last_action"] = "manual left"
@@ -490,10 +550,7 @@ def apply_command(command_name):
             STATE["last_action"] = "manual right"
             return True
         if command_name == "stop":
-            set_motion("stopped")
-            trigger_brake_light()
-            STATE["last_action"] = "manual stop"
-            return True
+            return set_manual_throttle(0)
 
     return False
 
@@ -546,6 +603,43 @@ def read_distance_safe():
         return -1
 
 
+def run_manual_tick():
+    now = time.ticks_ms()
+
+    if not STATE["car_started"]:
+        if STATE["current_motion"] != "stopped":
+            set_motion("stopped")
+        return
+
+    if STATE["drive_mode"] != "manual":
+        return
+
+    throttle = STATE["manual_throttle_pct"]
+    if throttle == 0:
+        if STATE["current_motion"] != "stopped":
+            set_motion("stopped")
+        return
+
+    start_ms = STATE["manual_pwm_window_start_ms"]
+    if start_ms == 0:
+        start_ms = now
+        STATE["manual_pwm_window_start_ms"] = now
+
+    elapsed = time.ticks_diff(now, start_ms)
+    if elapsed >= MANUAL_PWM_WINDOW_MS:
+        STATE["manual_pwm_window_start_ms"] = now
+        elapsed = 0
+
+    on_ms = (MANUAL_PWM_WINDOW_MS * abs(throttle)) // 100
+    if on_ms > 0 and elapsed < on_ms:
+        desired_motion = "forward" if throttle > 0 else "backward"
+    else:
+        desired_motion = "stopped"
+
+    if desired_motion != STATE["current_motion"]:
+        set_motion(desired_motion)
+
+
 def run_auto_tick(last_auto_tick):
     now = time.ticks_ms()
     if time.ticks_diff(now, last_auto_tick) < AUTO_DECISION_INTERVAL_MS:
@@ -578,6 +672,10 @@ def respond(conn, path, action_requested, route, params):
             command_name = params.get("name", "")
             applied = apply_command(command_name)
             send_json(conn, build_cmd_ack_json(command_name, applied))
+        elif route == "/api/throttle":
+            throttle_value = params.get("value", "0")
+            applied = set_manual_throttle(throttle_value)
+            send_json(conn, build_cmd_ack_json("throttle_{}".format(STATE["manual_throttle_pct"]), applied))
         elif action_requested:
             send_redirect(conn)
         else:
@@ -624,6 +722,7 @@ def loop(server_socket):
         manual_action = handle_manual_path(route)
         action_requested = state_action or manual_action
 
+        run_manual_tick()
         last_auto_tick = run_auto_tick(last_auto_tick)
         apply_lights()
         respond(conn, path, action_requested, route, params)
