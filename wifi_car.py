@@ -354,10 +354,10 @@ def build_page(distance):
             if (power) {
                 if (s.status === 'RUNNING') {
                     power.textContent = 'Turn OFF Car';
-                    power.className = 'toggle-off';
+                    power.className = 'toggle-on';
                 } else {
                     power.textContent = 'Turn ON Car';
-                    power.className = 'toggle-on';
+                    power.className = 'toggle-off';
                 }
             }
 
@@ -365,7 +365,7 @@ def build_page(distance):
             if (mode) {
                 if (s.mode === 'AUTO') {
                     mode.textContent = 'Switch To Manual';
-                    mode.className = 'toggle-neutral';
+                    mode.className = 'toggle-on';
                 } else {
                     mode.textContent = 'Switch To Auto';
                     mode.className = 'toggle-neutral';
