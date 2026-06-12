@@ -1,0 +1,34 @@
+{
+    "version": "2.0.0",
+    "tasks": [
+        {
+            "label": "Pico: List Files (mpremote)",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "tools/list_pico_files.ps1",
+                "-Port",
+                "COM3"
+            ],
+            "problemMatcher": []
+        },
+        {
+            "label": "Pico: Deploy Project Files (mpremote)",
+            "type": "shell",
+            "command": "powershell",
+            "args": [
+                "-ExecutionPolicy",
+                "Bypass",
+                "-File",
+                "tools/deploy_pico.ps1",
+                "-Port",
+                "COM3"
+            ],
+            "problemMatcher": [],
+            "group": "build"
+        }
+    ]
+}
