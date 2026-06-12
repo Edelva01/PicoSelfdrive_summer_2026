@@ -188,9 +188,25 @@ def build_page(distance):
         .toggle-off { background: #ffe5e5; border: 2px solid #8a1010; color: #8a1010; }
         .toggle-neutral { background: #fff6d8; border: 2px solid #8a6f10; color: #6a5208; }
         .row { margin: 8px 0; }
-        .slider-wrap { width: 92%; max-width: 420px; margin: 10px auto; }
-        .slider-readout { font-size: 18px; margin: 8px 0; font-weight: bold; }
-        #throttle-slider { width: 100%; }
+        .slider-wrap { width: 92%; max-width: 460px; margin: 10px auto; }
+        .slider-readout { font-size: 18px; margin: 8px 0 14px 0; font-weight: bold; }
+        .throttle-vertical-layout { display: flex; justify-content: center; align-items: center; gap: 16px; }
+        .throttle-ruler { height: 320px; display: flex; flex-direction: column; justify-content: space-between; align-items: flex-end; font-size: 13px; color: #222; }
+        .throttle-ruler span { display: block; min-width: 44px; text-align: right; }
+        .throttle-control-stack { display: flex; flex-direction: column; align-items: center; }
+        .arrow-tip-up,
+        .arrow-tip-down { width: 0; height: 0; border-left: 18px solid transparent; border-right: 18px solid transparent; }
+        .arrow-tip-up { border-bottom: 22px solid #1f2937; margin-bottom: 4px; }
+        .arrow-tip-down { border-top: 22px solid #1f2937; margin-top: 4px; }
+        .slider-axis { position: relative; width: 68px; height: 320px; display: flex; align-items: center; justify-content: center; }
+        .slider-axis::before { content: ""; position: absolute; height: 286px; width: 16px; border: 3px solid #1f2937; border-radius: 10px; background: repeating-linear-gradient(to bottom, #f8fafc 0, #f8fafc 8px, #dbe4ef 8px, #dbe4ef 16px); }
+        .center-stop-square { position: absolute; width: 26px; height: 26px; border: 2px solid #7a0014; background: #d90429; border-radius: 4px; z-index: 3; }
+        #throttle-slider { width: 286px; transform: rotate(-90deg); z-index: 4; background: transparent; -webkit-appearance: none; appearance: none; }
+        #throttle-slider:focus { outline: none; }
+        #throttle-slider::-webkit-slider-runnable-track { height: 14px; background: transparent; }
+        #throttle-slider::-webkit-slider-thumb { -webkit-appearance: none; width: 24px; height: 24px; border-radius: 4px; background: #d90429; border: 2px solid #7a0014; margin-top: -5px; }
+        #throttle-slider::-moz-range-track { height: 14px; background: transparent; }
+        #throttle-slider::-moz-range-thumb { width: 24px; height: 24px; border-radius: 4px; background: #d90429; border: 2px solid #7a0014; }
     </style>
 </head>
 <body>
@@ -221,8 +237,30 @@ def build_page(distance):
     <h2>Manual Drive Throttle</h2>
     <div class="slider-wrap">
         <div id="throttle-readout" class="slider-readout">Stop (0%)</div>
-        <input id="throttle-slider" type="range" min="-100" max="100" step="10" value="0" oninput="handleThrottleInput(this.value)">
-        <div class="small">Reverse -100% | 0% Stop | +100% Forward</div>
+        <div class="throttle-vertical-layout">
+            <div class="throttle-ruler">
+                <span>+100%</span>
+                <span>+80%</span>
+                <span>+60%</span>
+                <span>+40%</span>
+                <span>+20%</span>
+                <span>0%</span>
+                <span>-20%</span>
+                <span>-40%</span>
+                <span>-60%</span>
+                <span>-80%</span>
+                <span>-100%</span>
+            </div>
+            <div class="throttle-control-stack">
+                <div class="arrow-tip-up"></div>
+                <div class="slider-axis">
+                    <div class="center-stop-square"></div>
+                    <input id="throttle-slider" type="range" min="-100" max="100" step="10" value="0" oninput="handleThrottleInput(this.value)">
+                </div>
+                <div class="arrow-tip-down"></div>
+            </div>
+        </div>
+        <div class="small">Move up for forward, down for reverse, center red square for stop</div>
     </div>
 
     <script>
